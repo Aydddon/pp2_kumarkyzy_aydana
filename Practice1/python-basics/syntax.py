@@ -4,3 +4,9 @@ print("Learning Python is amazing!")
 
 if 5 > 2:
     print("Five is greater than two!")
+
+
+
+
+print("This will work!")
+print('This will also work!')

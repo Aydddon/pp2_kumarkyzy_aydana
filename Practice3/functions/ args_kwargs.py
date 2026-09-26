@@ -33,3 +33,47 @@ def my_function(**myvar):
   print("All data:", myvar)
 
 my_function(name = "Tobias", age = 30, city = "Bergen")
+
+#5
+def greet():
+  print("Hello")
+greet()
+
+#6
+def add(a,b):
+  return a+b
+result=add(3,5)
+print(result)
+
+#7
+
+def show(*args, **kwargs):
+  print(args)
+  print(kwargs)
+  show(1,2, name='Aida')
+
+  #7 
+  square = lambda x: x*x
+  print(square(4))
+
+  #8
+
+  class Student:
+    def hello(self):
+      print("Hello")
+
+student= Student("Aida")
+student.hello()
+
+
+class Student:
+  def __init__(self,name, age):
+    self.name=name
+    self.age=age
+
+def show_info(self):
+  print(self.name)
+  print(self.age)
+
+student = Student("Aida", 19)
+student.show_info()

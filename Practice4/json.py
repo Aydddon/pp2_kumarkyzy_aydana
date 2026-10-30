@@ -11,7 +11,6 @@ x={
     "age":30,
     "city":"Kostanay"
 }
-
 y=json.dumps(x)
 print(y)
 

@@ -11,7 +11,7 @@ BEGIN
         c.id,
         c.first_name,
         c.phone
-    FROM contacts c
+    FROM contacts AS c
     WHERE c.first_name ILIKE '%' || p_pattern || '%'
        OR c.phone ILIKE '%' || p_pattern || '%'
     ORDER BY c.id;
@@ -43,7 +43,7 @@ BEGIN
         c.id,
         c.first_name,
         c.phone
-    FROM contacts c
+    FROM contacts AS c
     ORDER BY c.id
     LIMIT p_limit
     OFFSET p_offset;

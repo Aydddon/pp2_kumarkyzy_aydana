@@ -1,11 +1,15 @@
 CREATE OR REPLACE PROCEDURE upsert_contact(
     p_name VARCHAR,
-    p_phone VARCHAR
+    p_phone VARCHAR,
+    p_contact_id INTEGER DEFAULT NULL
 )
 LANGUAGE plpgsql
 AS $$
+DECLARE
+    v_match_count INTEGER;
+    v_match_id INTEGER;
 BEGIN
-    IF p_name IS NULL OR TRIM(p_name) = '' THEN
+    IF p_name IS NULL OR BTRIM(p_name) = '' THEN
         RAISE EXCEPTION 'Name cannot be empty';
     END IF;
 
@@ -13,25 +17,33 @@ BEGIN
         RAISE EXCEPTION 'Invalid phone number';
     END IF;
 
-    IF EXISTS (
-        SELECT 1
-        FROM contacts
-        WHERE first_name = p_name
-    ) THEN
-
+    IF p_contact_id IS NOT NULL THEN
         UPDATE contacts
-        SET phone = p_phone
-        WHERE first_name = p_name;
+        SET first_name = p_name, phone = p_phone
+        WHERE id = p_contact_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Contact ID % was not found', p_contact_id;
+        END IF;
+        RETURN;
+    END IF;
 
+    SELECT COUNT(*), MIN(id)
+    INTO v_match_count, v_match_id
+    FROM contacts
+    WHERE first_name = p_name OR phone = p_phone;
+
+    IF v_match_count > 1 THEN
+        RAISE EXCEPTION 'Several contacts match; specify the contact ID';
+    ELSIF v_match_count = 1 THEN
+        UPDATE contacts
+        SET first_name = p_name, phone = p_phone
+        WHERE id = v_match_id;
     ELSE
-
         INSERT INTO contacts(first_name, phone)
-        VALUES(p_name, p_phone);
-
+        VALUES (p_name, p_phone);
     END IF;
 END;
 $$;
-
 
 CREATE OR REPLACE PROCEDURE insert_many_contacts(
     IN p_contacts JSONB,
@@ -45,87 +57,68 @@ DECLARE
     v_phone VARCHAR;
 BEGIN
     p_invalid := '[]'::JSONB;
-
     IF jsonb_typeof(p_contacts) <> 'array' THEN
         RAISE EXCEPTION 'Input must be a JSON array';
     END IF;
 
-    FOR item IN
-        SELECT value
-        FROM jsonb_array_elements(p_contacts)
-    LOOP
-
+    FOR item IN SELECT value FROM jsonb_array_elements(p_contacts) LOOP
         v_name := item->>'first_name';
         v_phone := item->>'phone';
-
-        IF v_name IS NULL
-           OR TRIM(v_name) = ''
-           OR v_phone IS NULL
-           OR v_phone !~ '^\+?[0-9]{7,15}$'
-        THEN
-
-            p_invalid := p_invalid ||
-                jsonb_build_array(
-                    item || jsonb_build_object(
-                        'error', 'Invalid name or phone'
-                    )
-                );
-
+        IF v_name IS NULL OR BTRIM(v_name) = '' OR v_phone IS NULL
+           OR v_phone !~ '^\+?[0-9]{7,15}$' THEN
+            p_invalid := p_invalid || jsonb_build_array(
+                item || jsonb_build_object('error', 'Invalid name or phone')
+            );
         ELSE
-
             BEGIN
-                IF EXISTS (
-                    SELECT 1
-                    FROM contacts
-                    WHERE first_name = v_name
-                ) THEN
-
-                    UPDATE contacts
-                    SET phone = v_phone
-                    WHERE first_name = v_name;
-
-                ELSE
-
-                    INSERT INTO contacts(first_name, phone)
-                    VALUES(v_name, v_phone);
-
-                END IF;
-
-            EXCEPTION
-                WHEN unique_violation THEN
-
-                    p_invalid := p_invalid ||
-                        jsonb_build_array(
-                            item || jsonb_build_object(
-                                'error', 'Phone number already exists'
-                            )
-                        );
+                INSERT INTO contacts(first_name, phone)
+                VALUES (v_name, v_phone);
+            EXCEPTION WHEN unique_violation THEN
+                p_invalid := p_invalid || jsonb_build_array(
+                    item || jsonb_build_object('error', 'Phone number already exists')
+                );
             END;
-
         END IF;
-
     END LOOP;
 END;
 $$;
 
-
 CREATE OR REPLACE PROCEDURE delete_contact(
-    p_name VARCHAR,
-    p_phone VARCHAR
+    p_name VARCHAR DEFAULT NULL,
+    p_phone VARCHAR DEFAULT NULL,
+    p_contact_id INTEGER DEFAULT NULL
 )
 LANGUAGE plpgsql
 AS $$
+DECLARE
+    v_match_count INTEGER;
+    v_match_id INTEGER;
 BEGIN
+    IF p_contact_id IS NOT NULL THEN
+        DELETE FROM contacts WHERE id = p_contact_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Contact ID % was not found', p_contact_id;
+        END IF;
+        RETURN;
+    END IF;
 
-    IF p_name IS NULL AND p_phone IS NULL THEN
+    IF (p_name IS NULL OR BTRIM(p_name) = '')
+       AND (p_phone IS NULL OR BTRIM(p_phone) = '') THEN
         RAISE EXCEPTION 'Provide a name or phone number';
     END IF;
 
-    DELETE FROM contacts
-    WHERE
-        (p_name IS NOT NULL AND first_name = p_name)
-        OR
-        (p_phone IS NOT NULL AND phone = p_phone);
+    SELECT COUNT(*), MIN(id)
+    INTO v_match_count, v_match_id
+    FROM contacts
+    WHERE (p_name IS NOT NULL AND first_name = p_name)
+       OR (p_phone IS NOT NULL AND phone = p_phone);
 
+    IF v_match_count = 0 THEN
+        RAISE EXCEPTION 'No matching contact found';
+    ELSIF v_match_count > 1 THEN
+        RAISE EXCEPTION 'Several contacts match; specify the contact ID';
+    ELSE
+        DELETE FROM contacts WHERE id = v_match_id;
+    END IF;
 END;
 $$;

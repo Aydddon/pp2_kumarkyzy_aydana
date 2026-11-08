@@ -2,39 +2,83 @@
 import csv
 import json
 
-from connect import connect, create_table
+from connect import connect, create_table, install_sql_objects
 # 1. Add a new contact
 
-def add_contact():
-    first_name = input("Enter first name: ").strip()
-    phone = input("Enter phone number: ").strip()
+def choose_contact_id(contacts):
+    """Return the selected contact ID, or None when no match is chosen."""
+    if not contacts:
+        return None
+    if len(contacts) == 1:
+        return contacts[0][0]
 
-    if not first_name or not phone:
-        print("Name and phone cannot be empty!")
-        return
+    print("Several contacts match:")
+    for contact_id, name, phone in contacts:
+        print(f"ID: {contact_id}, Name: {name}, Phone: {phone}")
+    selected = input("Enter the ID of the contact: ").strip()
+    if not selected.isdigit() or int(selected) not in {row[0] for row in contacts}:
+        print("That ID is not in the list.")
+        return None
+    return int(selected)
 
+
+def find_matching_contacts(name=None, phone=None):
     conn = connect()
     cur = conn.cursor()
-
     try:
         cur.execute(
-            """
-            INSERT INTO contacts (first_name, phone)
-            VALUES (%s, %s)
-            """,
-            (first_name, phone)
+            """SELECT id, first_name, phone FROM contacts
+               WHERE (%s::VARCHAR IS NOT NULL AND first_name = %s)
+                  OR (%s::VARCHAR IS NOT NULL AND phone = %s)
+               ORDER BY id""",
+            (name, name, phone, phone),
         )
-
-        conn.commit()
-        print("Contact added successfully!")
-
-    except Exception as e:
-        conn.rollback()
-        print("Error adding contact:", e)
-
+        return cur.fetchall()
     finally:
         cur.close()
         conn.close()
+
+
+def save_contact(name, phone):
+    if not name or not phone:
+        print("Name and phone cannot be empty!")
+        return
+
+    try:
+        matches = find_matching_contacts(name=name, phone=phone)
+        contact_id = choose_contact_id(matches)
+        if len(matches) > 1 and contact_id is None:
+            return
+        conn = connect()
+        cur = conn.cursor()
+        try:
+            cur.execute("CALL upsert_contact(%s, %s, %s)", (name, phone, contact_id))
+            conn.commit()
+            cur.execute(
+                "SELECT id, first_name, phone FROM contacts WHERE phone = %s",
+                (phone,),
+            )
+            saved_contact = cur.fetchone()
+            print("Contact added or updated successfully!")
+            if saved_contact:
+                print(
+                    f"ID: {saved_contact[0]}, Name: {saved_contact[1]}, "
+                    f"Phone: {saved_contact[2]}"
+                )
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        print("Error saving contact:", e)
+
+
+def add_contact():
+    name = input("Enter first name: ").strip()
+    phone = input("Enter phone number: ").strip()
+    save_contact(name, phone)
 
 
 # 2. Import contacts from CSV
@@ -150,7 +194,7 @@ def search_by_name():
 
         if contacts:
             for contact in contacts:
-                print(contact)
+                print(f"ID: {contact[0]}, Name: {contact[1]}, Phone: {contact[2]}")
         else:
             print("No contacts found.")
 
@@ -312,26 +356,7 @@ def search_by_pattern():
 def upsert_contact_python():
     name = input("Enter first name: ").strip()
     phone = input("Enter phone: ").strip()
-
-    conn = connect()
-    cur = conn.cursor()
-
-    try:
-        cur.execute(
-            "CALL upsert_contact(%s, %s)",
-            (name, phone)
-        )
-
-        conn.commit()
-        print("Contact inserted or updated successfully!")
-
-    except Exception as e:
-        conn.rollback()
-        print("Error:", e)
-
-    finally:
-        cur.close()
-        conn.close()
+    save_contact(name, phone)
 
 
 # 10. Insert many contacts using PROCEDURE
@@ -428,7 +453,7 @@ def show_contacts_paginated():
                 print("\n--- CONTACTS ---")
 
                 for contact in contacts:
-                    print(contact)
+                    print(f"ID: {contact[0]}, Name: {contact[1]}, Phone: {contact[2]}")
             else:
                 print("No contacts on this page.")
 
@@ -448,46 +473,39 @@ def show_contacts_paginated():
 def delete_by_name_or_phone():
     print("\n1. Delete by name")
     print("2. Delete by phone")
-
     choice = input("Choose option: ").strip()
-
-    name = None
-    phone = None
-
     if choice == "1":
-        name = input("Enter first name: ").strip()
-
+        name = input("Enter exact first name: ").strip()
         if not name:
             print("Name cannot be empty.")
             return
-
+        matches = find_matching_contacts(name=name)
     elif choice == "2":
-        phone = input("Enter phone: ").strip()
-
+        phone = input("Enter exact phone number: ").strip()
         if not phone:
             print("Phone cannot be empty.")
             return
-
+        matches = find_matching_contacts(phone=phone)
     else:
         print("Invalid choice.")
         return
 
+    if not matches:
+        print("No matching contact found.")
+        return
+    contact_id = choose_contact_id(matches)
+    if contact_id is None:
+        return
+
     conn = connect()
     cur = conn.cursor()
-
     try:
-        cur.execute(
-            "CALL delete_contact(%s, %s)",
-            (name, phone)
-        )
-
+        cur.execute("CALL delete_contact(NULL, NULL, %s)", (contact_id,))
         conn.commit()
-        print("Delete operation completed!")
-
+        print(f"Contact with ID {contact_id} deleted successfully!")
     except Exception as e:
         conn.rollback()
         print("Delete error:", e)
-
     finally:
         cur.close()
         conn.close()
@@ -495,6 +513,7 @@ def delete_by_name_or_phone():
 
 def main():
     create_table()
+    install_sql_objects()
 
     while True:
 
@@ -542,15 +561,18 @@ def main():
 
         elif choice == "8":
             search_by_pattern()
+            input("\nPress Enter to return to the menu...")
 
         elif choice == "9":
             upsert_contact_python()
+            input("\nPress Enter to return to the menu...")
 
         elif choice == "10":
             bulk_insert_contacts()
 
         elif choice == "11":
             show_contacts_paginated()
+            input("\nPress Enter to return to the menu...")
 
         elif choice == "12":
             delete_by_name_or_phone()

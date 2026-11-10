@@ -1,3 +1,7 @@
+-- Remove obsolete two-argument procedures that can affect every same-name row.
+DROP PROCEDURE IF EXISTS upsert_contact(VARCHAR, VARCHAR);
+DROP PROCEDURE IF EXISTS delete_contact(VARCHAR, VARCHAR);
+
 CREATE OR REPLACE PROCEDURE upsert_contact(
     p_name VARCHAR,
     p_phone VARCHAR,

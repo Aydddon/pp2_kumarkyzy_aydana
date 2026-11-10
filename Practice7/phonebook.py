@@ -189,6 +189,26 @@ def show_contacts():
     finally:
         cur.close()
         conn.close()
+
+def search():
+    name =input()
+
+    conn=connect()
+    cur=conn.cursor()
+
+    cur.execute(
+        "SELECT * FROM contacts WHERE first_name=%s",
+        (name,)
+    )
+
+    rows=cur.fetchall()
+    
+    for row in rows:
+        print(row)
+
+    cur.close()
+    conn.close()
+
 # Main menu
 def main():
     create_table()

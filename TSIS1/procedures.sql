@@ -68,20 +68,20 @@ BEGIN
     FOR item IN SELECT value FROM jsonb_array_elements(p_contacts) LOOP
         v_name := item->>'first_name';
         v_phone := item->>'phone';
-
         IF v_name IS NULL OR BTRIM(v_name) = '' OR v_phone IS NULL
            OR v_phone !~ '^\+?[0-9]{7,15}$' THEN
             p_invalid := p_invalid || jsonb_build_array(
                 item || jsonb_build_object('error', 'Invalid name or phone')
             );
-        ELSIF EXISTS (SELECT 1 FROM contacts WHERE phone = v_phone)
-           OR EXISTS (SELECT 1 FROM phones WHERE phone = v_phone) THEN
-            p_invalid := p_invalid || jsonb_build_array(
-                item || jsonb_build_object('error', 'Phone number already exists')
-            );
         ELSE
-            INSERT INTO contacts(first_name, phone)
-            VALUES (BTRIM(v_name), v_phone);
+            BEGIN
+                INSERT INTO contacts(first_name, phone)
+                VALUES (v_name, v_phone);
+            EXCEPTION WHEN unique_violation THEN
+                p_invalid := p_invalid || jsonb_build_array(
+                    item || jsonb_build_object('error', 'Phone number already exists')
+                );
+            END;
         END IF;
     END LOOP;
 END;

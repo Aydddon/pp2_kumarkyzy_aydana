@@ -1,4 +1,4 @@
---Idempotent extension of the Practice 8 PhoneBook schema.
+-- Idempotent extension of the Practice 8 PhoneBook schema.
 CREATE TABLE IF NOT EXISTS groups (
     id SERIAL PRIMARY KEY,
     name VARCHAR(50) UNIQUE NOT NULL
@@ -30,6 +30,25 @@ DECLARE other_id INTEGER;
 BEGIN
     SELECT id INTO other_id FROM groups WHERE name = 'Other';
     EXECUTE format('ALTER TABLE contacts ALTER COLUMN group_id SET DEFAULT %s', other_id);
+END;
+$$;
+
+-- Remove the old single-phone uniqueness constraint so contacts can own multiple phones.
+DO $$
+DECLARE r RECORD;
+BEGIN
+    FOR r IN
+        SELECT con.conname
+        FROM pg_constraint con
+        WHERE con.conrelid = 'contacts'::regclass
+          AND con.contype = 'u'
+          AND (SELECT array_agg(att.attname ORDER BY att.attname)
+               FROM unnest(con.conkey) AS key(attnum)
+               JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = key.attnum)
+              = ARRAY['phone']::name[]
+    LOOP
+        EXECUTE format('ALTER TABLE contacts DROP CONSTRAINT %I', r.conname);
+    END LOOP;
 END;
 $$;
 

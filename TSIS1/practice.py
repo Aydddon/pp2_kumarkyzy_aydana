@@ -21,15 +21,27 @@
 #         conn.close()
 
 #посчитать контакты
-def count_contact():
+
+# def count_contacts():
+#     conn=connect()
+#     cur=conn.cursor()
+
+#     try:
+#         cur.excecute("Select count(*) from contacts")
+#         print("Total contacts:", cur.fetchone()[0])
+#     except Exception as e:
+#         print("Error:",e)
+#     finally:
+#         cur.close()
+#         conn.close()
+
+
+def show_by_group():
+    group=input("Group name:").strip()
     conn=connect()
     cur=conn.cursor()
 
     try:
-        cur.excecute("Select count(*) from contacts")
-        print("Total contacts:",cur.fetchone()[0])
-    except Exception as e:
-        print("error:",e) 
-    finally:
-        cur.close()
-        conn.close()
+       cur.execute(""""Select c.id, c.first_name, c.phone
+                   From contacts c
+                   """)

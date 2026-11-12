@@ -28,15 +28,20 @@ def valid_contact(email, birthday, phones):
 
 
 def fetch_all(sql, params=()):
-    with connect() as conn:
-        return conn.execute(sql, params).fetchall()
+    conn = connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(sql, params)
+        return cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
 
-
-def get_group_id(conn, name):
+def get_group_id(cur, name):
     name = (name or "Other").strip() or "Other"
-    conn.execute("INSERT INTO groups(name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (name,))
-    return conn.execute("SELECT id FROM groups WHERE name = %s", (name,)).fetchone()[0]
-
+    cur.execute("INSERT INTO groups(name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (name,))
+    cur.execute("SELECT id FROM groups WHERE name = %s", (name,))
+    return cur.fetchone()[0]
 
 def show_contacts(rows):
     if not rows:
@@ -62,23 +67,29 @@ def add_contact():
         print(error or "Name cannot be empty.")
         return
 
+    conn = connect()
+    cur = conn.cursor()
     try:
-        with connect() as conn:
-            group_id = get_group_id(conn, group)
-            row = conn.execute(
-                """INSERT INTO contacts(first_name, phone, email, birthday, group_id)
-                   VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-                (name, phone or None, email, birthday, group_id),
-            ).fetchone()
-            if phone:
-                conn.execute(
-                    "UPDATE phones SET type = %s WHERE contact_id = %s AND phone = %s",
-                    (kind, row[0], phone),
-                )
-        print(f"Contact added. ID: {row[0]}")
+        group_id = get_group_id(cur, group)
+        cur.execute(
+            """INSERT INTO contacts(first_name, phone, email, birthday, group_id)
+               VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+            (name, phone or None, email, birthday, group_id),
+        )
+        contact_id = cur.fetchone()[0]
+        if phone:
+            cur.execute(
+                "UPDATE phones SET type = %s WHERE contact_id = %s AND phone = %s",
+                (kind, contact_id, phone),
+            )
+        conn.commit()
+        print(f"Contact added. ID: {contact_id}")
     except Exception as e:
+        conn.rollback()
         print("Could not add contact:", e)
-
+    finally:
+        cur.close()
+        conn.close()
 
 def search_contacts():
     query = input("Search name, email, or phone: ").strip()
@@ -155,37 +166,51 @@ def import_csv():
         return
 
     imported = skipped = 0
+    conn = connect()
+    cur = conn.cursor()
     try:
-        with connect() as conn:
-            for line, row in enumerate(rows, start=2):
-                name = (row.get("first_name") or "").strip()
-                phone = (row.get("phone") or "").strip()
-                kind = (row.get("phone_type") or row.get("type") or "mobile").strip().lower()
-                email = (row.get("email") or "").strip() or None
-                birthday = (row.get("birthday") or "").strip() or None
-                group = (row.get("group") or "Other").strip() or "Other"
-                error = valid_contact(email, birthday, [{"phone": phone, "type": kind}])
-                if not name or error:
-                    print(f"Line {line} skipped: {error or 'empty name'}")
-                    skipped += 1
-                    continue
-                if phone and conn.execute("SELECT 1 FROM phones WHERE phone = %s LIMIT 1", (phone,)).fetchone():
-                    print(f"Line {line} skipped: phone already exists.")
-                    skipped += 1
-                    continue
-                group_id = get_group_id(conn, group)
-                contact_id = conn.execute(
-                    """INSERT INTO contacts(first_name, phone, email, birthday, group_id)
-                       VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-                    (name, phone or None, email, birthday, group_id),
-                ).fetchone()[0]
-                if phone:
-                    conn.execute("UPDATE phones SET type = %s WHERE contact_id = %s AND phone = %s", (kind, contact_id, phone))
-                imported += 1
+        for line, row in enumerate(rows, start=2):
+            name = (row.get("first_name") or "").strip()
+            phone = (row.get("phone") or "").strip()
+            kind = (row.get("phone_type") or row.get("type") or "mobile").strip().lower()
+            email = (row.get("email") or "").strip() or None
+            birthday = (row.get("birthday") or "").strip() or None
+            group = (row.get("group") or "Other").strip() or "Other"
+            error = valid_contact(email, birthday, [{"phone": phone, "type": kind}])
+            if not name or error:
+                print(f"Line {line} skipped: {error or 'empty name'}")
+                skipped += 1
+                continue
+            if phone:
+                cur.execute("SELECT 1 FROM phones WHERE phone = %s LIMIT 1", (phone,))
+                exists = cur.fetchone()
+            else:
+                exists = None
+            if exists:
+                print(f"Line {line} skipped: phone already exists.")
+                skipped += 1
+                continue
+            group_id = get_group_id(cur, group)
+            cur.execute(
+                """INSERT INTO contacts(first_name, phone, email, birthday, group_id)
+                   VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                (name, phone or None, email, birthday, group_id),
+            )
+            contact_id = cur.fetchone()[0]
+            if phone:
+                cur.execute(
+                    "UPDATE phones SET type = %s WHERE contact_id = %s AND phone = %s",
+                    (kind, contact_id, phone),
+                )
+            imported += 1
+        conn.commit()
         print(f"Imported {imported}; skipped {skipped}.")
     except Exception as e:
+        conn.rollback()
         print("CSV import error:", e)
-
+    finally:
+        cur.close()
+        conn.close()
 
 def export_json():
     filename = input("JSON filename [contacts.json]: ").strip() or "contacts.json"
@@ -222,94 +247,114 @@ def import_json():
         return
 
     imported = skipped = 0
+    conn = connect()
+    cur = conn.cursor()
     try:
-        with connect() as conn:
-            for item in data:
-                if not isinstance(item, dict):
+        for item in data:
+            if not isinstance(item, dict):
+                skipped += 1
+                continue
+            name = (item.get("first_name") or "").strip()
+            phones = item.get("phones") or []
+            if not name or not isinstance(phones, list):
+                skipped += 1
+                continue
+            error = valid_contact(item.get("email"), item.get("birthday"), phones)
+            if error:
+                print(f"Skipped {name}: {error}")
+                skipped += 1
+                continue
+
+            cur.execute("SELECT id FROM contacts WHERE first_name ILIKE %s ORDER BY id", (name,))
+            matches = cur.fetchall()
+            contact_id = None
+            if matches:
+                action = input(f"{name} exists: skip or overwrite? ").strip().lower()
+                if action != "overwrite":
                     skipped += 1
                     continue
-                name = (item.get("first_name") or "").strip()
-                phones = item.get("phones") or []
-                if not name or not isinstance(phones, list):
-                    skipped += 1
-                    continue
-                error = valid_contact(item.get("email"), item.get("birthday"), phones)
-                if error:
-                    print(f"Skipped {name}: {error}")
-                    skipped += 1
-                    continue
-                matches = conn.execute(
-                    "SELECT id FROM contacts WHERE first_name ILIKE %s ORDER BY id", (name,)
-                ).fetchall()
-                contact_id = None
-                if matches:
-                    action = input(f"{name} exists: skip or overwrite? ").strip().lower()
-                    if action != "overwrite":
+                if len(matches) == 1:
+                    contact_id = matches[0][0]
+                else:
+                    print("Matching IDs:", [m[0] for m in matches])
+                    selected = input("ID to overwrite: ").strip()
+                    if not selected.isdigit() or int(selected) not in [m[0] for m in matches]:
                         skipped += 1
                         continue
-                    if len(matches) == 1:
-                        contact_id = matches[0][0]
-                    else:
-                        print("Matching IDs:", [m[0] for m in matches])
-                        selected = input("ID to overwrite: ").strip()
-                        if not selected.isdigit() or int(selected) not in [m[0] for m in matches]:
-                            skipped += 1
-                            continue
-                        contact_id = int(selected)
-                group_id = get_group_id(conn, item.get("group"))
-                primary = next((p.get("phone") for p in phones if p.get("phone")), None)
-                values = (name, primary, item.get("email"), item.get("birthday"), group_id)
-                if contact_id:
-                    conn.execute(
-                        """UPDATE contacts SET first_name=%s, phone=%s, email=%s, birthday=%s, group_id=%s
-                           WHERE id=%s""", (*values, contact_id)
+                    contact_id = int(selected)
+
+            group_id = get_group_id(cur, item.get("group"))
+            primary = next((p.get("phone") for p in phones if p.get("phone")), None)
+            values = (name, primary, item.get("email"), item.get("birthday"), group_id)
+            if contact_id:
+                cur.execute(
+                    """UPDATE contacts SET first_name=%s, phone=%s, email=%s, birthday=%s, group_id=%s
+                       WHERE id=%s""",
+                    (*values, contact_id),
+                )
+                cur.execute("DELETE FROM phones WHERE contact_id=%s", (contact_id,))
+            else:
+                cur.execute(
+                    """INSERT INTO contacts(first_name, phone, email, birthday, group_id)
+                       VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                    values,
+                )
+                contact_id = cur.fetchone()[0]
+            for phone in phones:
+                number = (phone.get("phone") or "").strip()
+                kind = (phone.get("type") or "mobile").lower()
+                if number:
+                    cur.execute(
+                        """INSERT INTO phones(contact_id, phone, type) VALUES (%s, %s, %s)
+                           ON CONFLICT (contact_id, phone) DO UPDATE SET type=EXCLUDED.type""",
+                        (contact_id, number, kind),
                     )
-                    conn.execute("DELETE FROM phones WHERE contact_id=%s", (contact_id,))
-                else:
-                    contact_id = conn.execute(
-                        """INSERT INTO contacts(first_name, phone, email, birthday, group_id)
-                           VALUES (%s, %s, %s, %s, %s) RETURNING id""", values
-                    ).fetchone()[0]
-                for phone in phones:
-                    number = (phone.get("phone") or "").strip()
-                    kind = (phone.get("type") or "mobile").lower()
-                    if number:
-                        conn.execute(
-                            """INSERT INTO phones(contact_id, phone, type) VALUES (%s, %s, %s)
-                               ON CONFLICT (contact_id, phone) DO UPDATE SET type=EXCLUDED.type""",
-                            (contact_id, number, kind),
-                        )
-                imported += 1
+            imported += 1
+        conn.commit()
         print(f"Imported/overwrote {imported}; skipped {skipped}.")
     except Exception as e:
+        conn.rollback()
         print("JSON import error:", e)
-
+    finally:
+        cur.close()
+        conn.close()
 
 def add_phone():
     name = input("Exact contact name: ").strip()
     phone = input("Phone: ").strip()
     kind = input("Type home/work/mobile: ").strip().lower()
-    if not valid_contact(None, None, [{"phone": phone, "type": kind}]):
-        try:
-            with connect() as conn:
-                conn.execute("CALL add_phone(%s, %s, %s)", (name, phone, kind))
-            print("Phone added.")
-        except Exception as e:
-            print("Add phone error:", e)
-    else:
+    if valid_contact(None, None, [{"phone": phone, "type": kind}]):
         print("Check the phone number and type.")
+        return
 
+    conn = connect()
+    cur = conn.cursor()
+    try:
+        cur.execute("CALL add_phone(%s, %s, %s)", (name, phone, kind))
+        conn.commit()
+        print("Phone added.")
+    except Exception as e:
+        conn.rollback()
+        print("Add phone error:", e)
+    finally:
+        cur.close()
+        conn.close()
 
 def move_to_group():
     name = input("Exact contact name: ").strip()
     group = input("New group: ").strip()
+    conn = connect()
+    cur = conn.cursor()
     try:
-        with connect() as conn:
-            conn.execute("CALL move_to_group(%s, %s)", (name, group))
+        cur.execute("CALL move_to_group(%s, %s)", (name, group))
+        conn.commit()
         print("Contact moved.")
     except Exception as e:
+        conn.rollback()
         print("Move group error:", e)
-
+    finally:
+        cur.close()
+        conn.close()
 
 def main():
     initialize_database()

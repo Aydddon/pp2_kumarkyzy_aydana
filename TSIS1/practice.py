@@ -35,13 +35,14 @@
 #         cur.close()
 #         conn.close()
 
+CREATE TABLE if not exists group(
+    id serial primary key,
+    name Varchar(50) unique not null
+);
 
-def show_by_group():
-    group=input("Group name:").strip()
-    conn=connect()
-    cur=conn.cursor()
+Insert into groups(name) Values("Family"),("Work"),("Friend"),("Other")
+ ON cinflict (name) Do noting;
 
-    try:
-       cur.execute(""""Select c.id, c.first_name, c.phone
-                   From contacts c
-                   """)
+create table if not exists contacts(
+ 
+)

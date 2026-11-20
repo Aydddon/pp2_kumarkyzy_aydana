@@ -356,6 +356,62 @@ def move_to_group():
         cur.close()
         conn.close()
 
+def delete_contact_by_id():
+    contact_id = input("Enter contact ID: ").strip()
+
+    if not contact_id.isdigit():
+        print("ID must be a number!")
+        return
+
+    conn = connect()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT c.first_name,
+                   COALESCE(
+                       string_agg(p.phone, ', ' ORDER BY p.id),
+                       c.phone,
+                       'no phone'
+                   )
+            FROM contacts AS c
+            LEFT JOIN phones AS p ON p.contact_id = c.id
+            WHERE c.id = %s
+            GROUP BY c.id, c.first_name, c.phone
+            """,
+            (int(contact_id),)
+        )
+        contact = cur.fetchone()
+
+        if not contact:
+            print("Contact not found.")
+            return
+
+        answer = input(
+            f"Delete {contact[0]} ({contact[1]})? Type yes to confirm: "
+        ).strip().lower()
+
+        if answer not in ("yes", "y"):
+            print("Cancelled.")
+            return
+
+        cur.execute(
+            "CALL delete_contact(NULL, NULL, %s)",
+            (int(contact_id),)
+        )
+        conn.commit()
+        print("Contact deleted successfully!")
+
+    except Exception as e:
+        conn.rollback()
+        print("Delete error:", e)
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 def main():
     initialize_database()
     actions = {
@@ -368,6 +424,7 @@ def main():
         "7": ("Export JSON", export_json),
         "8": ("Add phone", add_phone),
         "9": ("Move contact to group", move_to_group),
+        "10": ("Delete_contact",delete_contact_by_id),
     }
     while True:
         print("\\nTSIS 1 PhoneBook")

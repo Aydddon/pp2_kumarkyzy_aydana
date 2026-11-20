@@ -1,91 +1,6 @@
--- Remove obsolete two-argument procedures that can affect every same-name row.
+-- Remove obsolete unsafe Practice 8 overloads, if they still exist.
 DROP PROCEDURE IF EXISTS upsert_contact(VARCHAR, VARCHAR);
 DROP PROCEDURE IF EXISTS delete_contact(VARCHAR, VARCHAR);
-
-CREATE OR REPLACE PROCEDURE upsert_contact(
-    p_name VARCHAR,
-    p_phone VARCHAR,
-    p_contact_id INTEGER DEFAULT NULL
-)
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    v_match_count INTEGER;
-    v_match_id INTEGER;
-BEGIN
-    IF p_name IS NULL OR BTRIM(p_name) = '' THEN
-        RAISE EXCEPTION 'Name cannot be empty';
-    END IF;
-
-    IF p_phone IS NULL OR p_phone !~ '^\+?[0-9]{7,15}$' THEN
-        RAISE EXCEPTION 'Invalid phone number';
-    END IF;
-
-    IF p_contact_id IS NOT NULL THEN
-        UPDATE contacts
-        SET first_name = p_name, phone = p_phone
-        WHERE id = p_contact_id;
-        IF NOT FOUND THEN
-            RAISE EXCEPTION 'Contact ID % was not found', p_contact_id;
-        END IF;
-        RETURN;
-    END IF;
-
-    SELECT COUNT(*), MIN(id)
-    INTO v_match_count, v_match_id
-    FROM contacts
-    WHERE first_name = p_name OR phone = p_phone;
-
-    IF v_match_count > 1 THEN
-        RAISE EXCEPTION 'Several contacts match; specify the contact ID';
-    ELSIF v_match_count = 1 THEN
-        UPDATE contacts
-        SET first_name = p_name, phone = p_phone
-        WHERE id = v_match_id;
-    ELSE
-        INSERT INTO contacts(first_name, phone)
-        VALUES (p_name, p_phone);
-    END IF;
-END;
-$$;
-
-CREATE OR REPLACE PROCEDURE insert_many_contacts(
-    IN p_contacts JSONB,
-    INOUT p_invalid JSONB
-)
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    item JSONB;
-    v_name VARCHAR;
-    v_phone VARCHAR;
-BEGIN
-    p_invalid := '[]'::JSONB;
-    IF jsonb_typeof(p_contacts) <> 'array' THEN
-        RAISE EXCEPTION 'Input must be a JSON array';
-    END IF;
-
-    FOR item IN SELECT value FROM jsonb_array_elements(p_contacts) LOOP
-        v_name := item->>'first_name';
-        v_phone := item->>'phone';
-        IF v_name IS NULL OR BTRIM(v_name) = '' OR v_phone IS NULL
-           OR v_phone !~ '^\+?[0-9]{7,15}$' THEN
-            p_invalid := p_invalid || jsonb_build_array(
-                item || jsonb_build_object('error', 'Invalid name or phone')
-            );
-        ELSE
-            BEGIN
-                INSERT INTO contacts(first_name, phone)
-                VALUES (v_name, v_phone);
-            EXCEPTION WHEN unique_violation THEN
-                p_invalid := p_invalid || jsonb_build_array(
-                    item || jsonb_build_object('error', 'Phone number already exists')
-                );
-            END;
-        END IF;
-    END LOOP;
-END;
-$$;
 
 CREATE OR REPLACE PROCEDURE delete_contact(
     p_name VARCHAR DEFAULT NULL,
@@ -127,7 +42,6 @@ BEGIN
 END;
 $$;
 
-
 CREATE OR REPLACE PROCEDURE add_phone(
     p_contact_name VARCHAR,
     p_phone VARCHAR,
@@ -139,6 +53,9 @@ DECLARE
     v_contact_count INTEGER;
     v_contact_id INTEGER;
 BEGIN
+    IF p_contact_name IS NULL OR BTRIM(p_contact_name) = '' THEN
+        RAISE EXCEPTION 'Contact name cannot be empty';
+    END IF;
     IF p_phone IS NULL OR p_phone !~ '^\+?[0-9]{7,15}$' THEN
         RAISE EXCEPTION 'Invalid phone number';
     END IF;
@@ -146,8 +63,11 @@ BEGIN
         RAISE EXCEPTION 'Phone type must be home, work, or mobile';
     END IF;
 
-    SELECT COUNT(*), MIN(id) INTO v_contact_count, v_contact_id
-    FROM contacts WHERE first_name = p_contact_name;
+    SELECT COUNT(*), MIN(id)
+    INTO v_contact_count, v_contact_id
+    FROM contacts
+    WHERE first_name = BTRIM(p_contact_name);
+
     IF v_contact_count = 0 THEN
         RAISE EXCEPTION 'Contact not found';
     ELSIF v_contact_count > 1 THEN
@@ -177,8 +97,11 @@ BEGIN
         RAISE EXCEPTION 'Group name cannot be empty';
     END IF;
 
-    SELECT COUNT(*), MIN(id) INTO v_contact_count, v_contact_id
-    FROM contacts WHERE first_name = p_contact_name;
+    SELECT COUNT(*), MIN(id)
+    INTO v_contact_count, v_contact_id
+    FROM contacts
+    WHERE first_name = BTRIM(p_contact_name);
+
     IF v_contact_count = 0 THEN
         RAISE EXCEPTION 'Contact not found';
     ELSIF v_contact_count > 1 THEN
@@ -187,9 +110,13 @@ BEGIN
 
     INSERT INTO groups(name) VALUES (INITCAP(BTRIM(p_group_name)))
     ON CONFLICT (name) DO NOTHING;
-    SELECT id INTO v_group_id FROM groups
+
+    SELECT id INTO v_group_id
+    FROM groups
     WHERE name = INITCAP(BTRIM(p_group_name));
 
-    UPDATE contacts SET group_id = v_group_id WHERE id = v_contact_id;
+    UPDATE contacts
+    SET group_id = v_group_id
+    WHERE id = v_contact_id;
 END;
 $$;

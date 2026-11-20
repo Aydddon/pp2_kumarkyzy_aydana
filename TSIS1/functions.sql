@@ -35,7 +35,7 @@ AS $$
     ORDER BY c.id;
 $$;
 
--- Page through contacts using the Practice 8 pagination approach.
+-- Return one page of contacts. The phone column is retained for Practice 8 compatibility.
 CREATE OR REPLACE FUNCTION get_contacts_paginated(
     p_limit INTEGER,
     p_offset INTEGER

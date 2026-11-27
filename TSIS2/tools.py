@@ -46,7 +46,7 @@ def draw_shape(surface: pygame.Surface, name: str, start: tuple[int, int],
     if name == "Circle":
         radius = round(pygame.Vector2(end).distance_to(start))
         if radius:
-            pygame.draw.circle(surface, color, start, radius, width)
+            pygame.draw.circle(surface, color, start, radius)
     elif name == "Rectangle":
         rect = normalized_rect(start, end)
         if rect.width and rect.height:

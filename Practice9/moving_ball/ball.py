@@ -14,6 +14,12 @@ class Ball:
     def move(self, dx: int, dy: int) -> None:
         """Apply a step only when the resulting circle remains on screen."""
         next_x, next_y = self.x + dx, self.y + dy
-        if (self.RADIUS <= next_x <= self.width - self.RADIUS and
+        if (self.RADIUS <= next_x <= self.width + self.RADIUS or
                 self.RADIUS <= next_y <= self.height - self.RADIUS):
-            self.x, self.y = next_x, next_y
+            print(self.y)
+            if self.y + dy <= 0:
+                self.y = 480
+                print(self.y)
+            else:
+                self.x, self.y = next_x, next_y
+       

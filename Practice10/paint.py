@@ -1,132 +1,163 @@
-import pygame
-import math
-import sys
+import pygame, math
 
-pygame.init()
+TOOLBAR_H = 70      # height of the toolbar at the top
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
 
-WIDTH, HEIGHT = 900, 650
-TOOLBAR_H = 70
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Paint")
-clock = pygame.time.Clock()
-font = pygame.font.SysFont("Verdana", 14)
-
-WHITE, BLACK, LIGHT = (255, 255, 255), (0, 0, 0), (225, 225, 225)
-PALETTE = [(0, 0, 0), (255, 255, 255), (220, 30, 30), (255, 140, 0), (255, 215, 0),
-           (0, 170, 0), (0, 200, 200), (30, 80, 220), (140, 40, 200), (255, 105, 180),
-           (120, 70, 30), (128, 128, 128)]
-
-# Canvas holds the finished drawing (everything below the toolbar)
-canvas = pygame.Surface((WIDTH, HEIGHT - TOOLBAR_H))
-canvas.fill(WHITE)
-
-# Toolbar buttons: name -> (rect, key shortcut)
-TOOLS = {"Pencil": (pygame.Rect(10, 10, 80, 26), pygame.K_p),
-         "Rect": (pygame.Rect(10, 40, 80, 26), pygame.K_r),
-         "Circle": (pygame.Rect(100, 10, 80, 26), pygame.K_c),
-         "Eraser": (pygame.Rect(100, 40, 80, 26), pygame.K_e)}
-swatches = [(pygame.Rect(210 + (i % 6) * 36, 8 + (i // 6) * 31, 30, 26), c)
-            for i, c in enumerate(PALETTE)]
-
-tool, color, size = "Pencil", BLACK, 5
-drawing = False
-start = (0, 0)       # where the mouse was pressed (for shapes)
-last = (0, 0)        # previous mouse position (for freehand lines)
+# Color selection: name -> RGB
+COLORS = {
+    'black': (0, 0, 0), 'red': (220, 30, 30), 'orange': (255, 140, 0),
+    'yellow': (255, 215, 0), 'green': (0, 170, 0), 'blue': (30, 80, 220),
+    'purple': (140, 40, 200), 'pink': (255, 105, 180),
+}
+# keyboard shortcuts for colors
+COLOR_KEYS = {
+    pygame.K_k: 'black', pygame.K_r: 'red', pygame.K_o: 'orange', pygame.K_y: 'yellow',
+    pygame.K_g: 'green', pygame.K_b: 'blue', pygame.K_u: 'purple', pygame.K_p: 'pink',
+}
+# tools: number key -> name
+TOOLS = ['Pencil', 'Rectangle', 'Circle', 'Eraser']
 
 
-def to_canvas(pos):
-    """Convert window coordinates to canvas coordinates."""
-    return pos[0], pos[1] - TOOLBAR_H
+def main():
+    pygame.init()
+    screen = pygame.display.set_mode((900, 650))
+    pygame.display.set_caption("Paint")
+    clock = pygame.time.Clock()
+    font = pygame.font.SysFont("Verdana", 13)
+
+    # canvas keeps the finished drawing
+    canvas = pygame.Surface((900, 650 - TOOLBAR_H))
+    canvas.fill(WHITE)
+
+    # toolbar buttons (tools) and color swatches
+    tool_rects = [pygame.Rect(10 + i * 100, 20, 92, 30) for i in range(len(TOOLS))]
+    color_rects = {name: pygame.Rect(430 + i * 36, 20, 30, 30)
+                   for i, name in enumerate(COLORS)}
+
+    tool = 'Pencil'
+    color_name = 'black'
+    radius = 5
+    drawing = False
+    start = (0, 0)     # where the mouse button was pressed
+    last = (0, 0)      # previous mouse position
+
+    while True:
+
+        pressed = pygame.key.get_pressed()
+        alt_held = pressed[pygame.K_LALT] or pressed[pygame.K_RALT]
+        ctrl_held = pressed[pygame.K_LCTRL] or pressed[pygame.K_RCTRL]
+
+        for event in pygame.event.get():
+
+            # determine if X was clicked, or Ctrl+W or Alt+F4 was used
+            if event.type == pygame.QUIT:
+                return
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_w and ctrl_held:
+                    return
+                if event.key == pygame.K_F4 and alt_held:
+                    return
+                if event.key == pygame.K_ESCAPE:
+                    return
+
+                # tools: 1-4
+                if pygame.K_1 <= event.key <= pygame.K_4:
+                    tool = TOOLS[event.key - pygame.K_1]
+                # colors by key
+                if event.key in COLOR_KEYS:
+                    color_name = COLOR_KEYS[event.key]
+                # brush size
+                if event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
+                    radius = min(50, radius + 1)
+                if event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+                    radius = max(1, radius - 1)
+
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if event.pos[1] < TOOLBAR_H:
+                    # click on the toolbar: choose tool or color
+                    for i, r in enumerate(tool_rects):
+                        if r.collidepoint(event.pos):
+                            tool = TOOLS[i]
+                    for name, r in color_rects.items():
+                        if r.collidepoint(event.pos):
+                            color_name = name
+                else:
+                    drawing = True
+                    start = last = (event.pos[0], event.pos[1] - TOOLBAR_H)
+                    if tool in ('Pencil', 'Eraser'):
+                        c = WHITE if tool == 'Eraser' else COLORS[color_name]
+                        pygame.draw.circle(canvas, c, start, radius)
+
+            if event.type == pygame.MOUSEMOTION and drawing:
+                position = (event.pos[0], event.pos[1] - TOOLBAR_H)
+                if tool in ('Pencil', 'Eraser'):
+                    # eraser = drawing with the background (white) colour
+                    c = WHITE if tool == 'Eraser' else COLORS[color_name]
+                    drawLineBetween(canvas, last, position, radius, c)
+                    last = position
+
+            if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and drawing:
+                drawing = False
+                end = (event.pos[0], event.pos[1] - TOOLBAR_H)
+                if tool in ('Rectangle', 'Circle'):
+                    # put the finished shape on the canvas
+                    drawShape(canvas, tool, start, end, radius, COLORS[color_name])
+
+        # ---- drawing everything ----
+        screen.blit(canvas, (0, TOOLBAR_H))
+
+        # live preview of a shape while the mouse is dragged
+        if drawing and tool in ('Rectangle', 'Circle'):
+            mx, my = pygame.mouse.get_pos()
+            preview = canvas.copy()
+            drawShape(preview, tool, start, (mx, my - TOOLBAR_H), radius, COLORS[color_name])
+            screen.blit(preview, (0, TOOLBAR_H))
+
+        drawToolbar(screen, font, tool_rects, color_rects, tool, color_name, radius)
+
+        pygame.display.flip()
+        clock.tick(60)
 
 
-def draw_shape(surface, tool, c, p1, p2):
-    """Draw a rectangle or circle defined by drag start p1 and current p2."""
-    if tool == "Rect":
-        rect = pygame.Rect(min(p1[0], p2[0]), min(p1[1], p2[1]),
-                           abs(p2[0] - p1[0]), abs(p2[1] - p1[1]))
-        pygame.draw.rect(surface, c, rect, max(1, size // 2))
-    elif tool == "Circle":
-        radius = int(math.hypot(p2[0] - p1[0], p2[1] - p1[1]))   # center = start point
-        if radius > 0:
-            pygame.draw.circle(surface, c, p1, radius, max(1, size // 2))
+def drawLineBetween(surface, start, end, width, color):
+    """Freehand line: circles are drawn along the line so there are no gaps."""
+    dx = start[0] - end[0]
+    dy = start[1] - end[1]
+    iterations = max(abs(dx), abs(dy), 1)
+
+    for i in range(iterations + 1):
+        progress = 1.0 * i / iterations
+        aprogress = 1 - progress
+        x = int(aprogress * start[0] + progress * end[0])
+        y = int(aprogress * start[1] + progress * end[1])
+        pygame.draw.circle(surface, color, (x, y), width)
 
 
-def draw_line_smooth(surface, c, p1, p2, width):
-    """Freehand stroke: circles along the line so there are no gaps."""
-    dist = max(1, int(math.hypot(p2[0] - p1[0], p2[1] - p1[1])))
-    for i in range(dist + 1):
-        t = i / dist
-        x = int(p1[0] + (p2[0] - p1[0]) * t)
-        y = int(p1[1] + (p2[1] - p1[1]) * t)
-        pygame.draw.circle(surface, c, (x, y), width)
+def drawShape(surface, tool, start, end, width, color):
+    """Draw a rectangle or a circle from the point where the drag started."""
+    line = max(1, width // 2)
+    if tool == 'Rectangle':
+        rect = pygame.Rect(min(start[0], end[0]), min(start[1], end[1]),
+                           abs(end[0] - start[0]), abs(end[1] - start[1]))
+        pygame.draw.rect(surface, color, rect, line)
+    elif tool == 'Circle':
+        # start = centre, distance to the mouse = radius
+        r = int(math.hypot(end[0] - start[0], end[1] - start[1]))
+        if r > 0:
+            pygame.draw.circle(surface, color, start, r, line)
 
 
-def draw_toolbar():
-    pygame.draw.rect(screen, LIGHT, (0, 0, WIDTH, TOOLBAR_H))
-    for name, (rect, key) in TOOLS.items():
-        pygame.draw.rect(screen, (170, 200, 255) if name == tool else WHITE, rect)
-        pygame.draw.rect(screen, BLACK, rect, 1)
-        label = f"{name} ({pygame.key.name(key).upper()})"
-        screen.blit(font.render(label, True, BLACK), (rect.x + 4, rect.y + 5))
-    for rect, c in swatches:
-        pygame.draw.rect(screen, c, rect)
-        pygame.draw.rect(screen, BLACK, rect, 3 if c == color else 1)
-    # Current color + size preview
-    pygame.draw.rect(screen, color, (450, 10, 40, 40))
-    pygame.draw.rect(screen, BLACK, (450, 10, 40, 40), 1)
-    screen.blit(font.render(f"Size: {size}  (+/-)", True, BLACK), (500, 22))
+def drawToolbar(screen, font, tool_rects, color_rects, tool, color_name, radius):
+    pygame.draw.rect(screen, (225, 225, 225), (0, 0, 900, TOOLBAR_H))
+    for i, r in enumerate(tool_rects):
+        pygame.draw.rect(screen, (170, 200, 255) if TOOLS[i] == tool else WHITE, r)
+        pygame.draw.rect(screen, BLACK, r, 1)
+        screen.blit(font.render("%d %s" % (i + 1, TOOLS[i]), True, BLACK), (r.x + 5, r.y + 7))
+    for name, r in color_rects.items():
+        pygame.draw.rect(screen, COLORS[name], r)
+        pygame.draw.rect(screen, BLACK, r, 3 if name == color_name else 1)
+    screen.blit(font.render("Size: %d (+/-)" % radius, True, BLACK), (730, 27))
 
 
-while True:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            pygame.quit()
-            sys.exit()
-
-        elif event.type == pygame.KEYDOWN:
-            for name, (_, key) in TOOLS.items():       # keyboard tool shortcuts
-                if event.key == key:
-                    tool = name
-            if event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
-                size = min(50, size + 1)
-            if event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-                size = max(1, size - 1)
-
-        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if event.pos[1] < TOOLBAR_H:               # click on the toolbar
-                for name, (rect, _) in TOOLS.items():
-                    if rect.collidepoint(event.pos):
-                        tool = name
-                for rect, c in swatches:               # color selection
-                    if rect.collidepoint(event.pos):
-                        color = c
-            else:                                      # start drawing on canvas
-                drawing = True
-                start = last = to_canvas(event.pos)
-                if tool in ("Pencil", "Eraser"):
-                    c = WHITE if tool == "Eraser" else color
-                    pygame.draw.circle(canvas, c, start, size)
-
-        elif event.type == pygame.MOUSEMOTION and drawing:
-            pos = to_canvas(event.pos)
-            if tool in ("Pencil", "Eraser"):
-                c = WHITE if tool == "Eraser" else color    # eraser paints white
-                draw_line_smooth(canvas, c, last, pos, size)
-                last = pos
-
-        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and drawing:
-            drawing = False
-            if tool in ("Rect", "Circle"):             # commit the shape to canvas
-                draw_shape(canvas, tool, color, start, to_canvas(event.pos))
-
-    # ---- Render ----
-    screen.blit(canvas, (0, TOOLBAR_H))
-    # Live preview of shape while dragging (not yet committed)
-    if drawing and tool in ("Rect", "Circle"):
-        preview = canvas.copy()
-        draw_shape(preview, tool, color, start, to_canvas(pygame.mouse.get_pos()))
-        screen.blit(preview, (0, TOOLBAR_H))
-    draw_toolbar()
-
-    pygame.display.flip()
-    clock.tick(120)
+main()

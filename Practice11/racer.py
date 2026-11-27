@@ -1,172 +1,212 @@
-import pygame
-import random
-import sys
+#Imports
+import pygame, sys
+from pygame.locals import *
+import random, time
 
+#Initializing
 pygame.init()
 
-# ---------- Constants ----------
-WIDTH, HEIGHT = 400, 600
+#Setting up FPS
 FPS = 60
-ROAD_LEFT, ROAD_RIGHT = 40, 360
-GRAY, WHITE, YELLOW = (60, 60, 60), (255, 255, 255), (255, 215, 0)
-GREEN, RED, BLUE, BLACK = (34, 139, 34), (200, 30, 30), (30, 80, 200), (0, 0, 0)
+FramePerSec = pygame.time.Clock()
 
-N_COINS_FOR_SPEEDUP = 5     # "N": enemy gets faster every N coins earned
-ENEMY_SPEED_STEP = 1        # how much faster the enemy gets each time
+#Creating colors
+BLUE  = (0, 0, 255)
+RED   = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLACK = (0, 0, 0)
+WHITE = (255, 255, 255)
 
-# Coin types: weight (value), radius, colour, spawn probability.
-# Heavier coins are bigger, differently coloured and rarer.
+#Other Variables for use in the program
+SCREEN_WIDTH = 400
+SCREEN_HEIGHT = 600
+ENEMY_SPEED = 5          # speed of the enemy (grows when player earns coins)
+COIN_SPEED = 5           # coins always fall with the same speed
+SCORE = 0                # number of enemies passed
+COINS = 0                # total VALUE of collected coins (sum of weights)
+
+N = 5                    # every N coins earned the enemy gets faster
+SPEED_STEP = 1           # how much faster
+next_speedup = N         # coin total at which the next speed-up happens
+
+# NEW: coin types with different weights.
+# weight = value of the coin, chance = probability of appearing (in %)
 COIN_TYPES = [
     {"weight": 1, "radius": 10, "color": (205, 127, 50),  "chance": 60},   # bronze
     {"weight": 2, "radius": 13, "color": (192, 192, 192), "chance": 30},   # silver
     {"weight": 3, "radius": 16, "color": (255, 215, 0),   "chance": 10},   # gold
 ]
 
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Racer")
-clock = pygame.time.Clock()
+#Setting up Fonts
+font = pygame.font.SysFont("Verdana", 60)
 font_small = pygame.font.SysFont("Verdana", 20)
-font_coin = pygame.font.SysFont("Verdana", 12, bold=True)
-font_big = pygame.font.SysFont("Verdana", 50)
+font_tiny = pygame.font.SysFont("Verdana", 12, bold=True)
+game_over = font.render("Game Over", True, BLACK)
 
-road_speed = 5              # speed of the road and falling coins
-enemy_speed = 5             # speed of the enemy (grows with collected coins)
-score = 0                   # enemies dodged
-coins = 0                   # total coin value collected
-next_speedup = N_COINS_FOR_SPEEDUP   # coin total at which enemy speeds up next
-
-
-def make_car(color):
-    """Draw a simple top-down car on a transparent surface."""
-    surf = pygame.Surface((40, 70), pygame.SRCALPHA)
-    pygame.draw.rect(surf, color, (0, 0, 40, 70), border_radius=8)
-    pygame.draw.rect(surf, (150, 200, 255), (6, 14, 28, 16))
-    pygame.draw.rect(surf, (150, 200, 255), (6, 44, 28, 12))
-    for y in (6, 50):
-        pygame.draw.rect(surf, BLACK, (-2, y, 5, 14))
-        pygame.draw.rect(surf, BLACK, (37, y, 5, 14))
-    return surf
+# If files from the tutorial archive are missing, simple drawn pictures are used instead
+def load_image(name, size, color):
+    try:
+        return pygame.image.load(name)
+    except (FileNotFoundError, pygame.error):
+        surf = pygame.Surface(size, pygame.SRCALPHA)
+        pygame.draw.rect(surf, color, (0, 0, size[0], size[1]), border_radius=8)
+        pygame.draw.rect(surf, (150, 200, 255), (6, 12, size[0] - 12, 16))   # windshield
+        return surf
 
 
-class Player(pygame.sprite.Sprite):
-    """Car controlled by the user."""
-    def __init__(self):
-        super().__init__()
-        self.image = make_car(BLUE)
-        self.rect = self.image.get_rect(center=(WIDTH // 2, HEIGHT - 60))
+def load_background():
+    try:
+        return pygame.image.load("AnimatedStreet.png")
+    except (FileNotFoundError, pygame.error):
+        surf = pygame.Surface((400, 600))
+        surf.fill((34, 139, 34))
+        pygame.draw.rect(surf, (60, 60, 60), (40, 0, 320, 600))
+        for y in range(0, 600, 80):
+            pygame.draw.rect(surf, (255, 255, 255), (197, y, 6, 40))
+        return surf
 
-    def update(self):
-        keys = pygame.key.get_pressed()
-        if (keys[pygame.K_LEFT] or keys[pygame.K_a]) and self.rect.left > ROAD_LEFT:
-            self.rect.x -= 6
-        if (keys[pygame.K_RIGHT] or keys[pygame.K_d]) and self.rect.right < ROAD_RIGHT:
-            self.rect.x += 6
+
+def play_crash():
+    try:
+        pygame.mixer.Sound('crash.wav').play()
+    except (FileNotFoundError, pygame.error):
+        pass
+
+
+#Images (files from the tutorial archive must be in the same folder)
+background = load_background()
+
+#Create a white screen
+DISPLAYSURF = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+DISPLAYSURF.fill(WHITE)
+pygame.display.set_caption("Game")
 
 
 class Enemy(pygame.sprite.Sprite):
-    """Enemy car; its speed depends on the global enemy_speed."""
-    def __init__(self):
+      def __init__(self):
         super().__init__()
-        self.image = make_car(RED)
+        self.image = load_image("Enemy.png", (45, 80), (200, 30, 30))
         self.rect = self.image.get_rect()
-        self.respawn()
+        self.rect.center = (random.randint(40, SCREEN_WIDTH-40), 0)
 
-    def respawn(self):
-        self.rect.center = (random.randint(ROAD_LEFT + 25, ROAD_RIGHT - 25), -40)
-
-    def update(self):
-        global score
-        self.rect.y += enemy_speed
-        if self.rect.top > HEIGHT:
-            score += 1
-            self.respawn()
+      def move(self):
+        global SCORE
+        self.rect.move_ip(0, ENEMY_SPEED)       # uses the enemy's own speed
+        if (self.rect.top > 600):
+            SCORE += 1
+            self.rect.top = 0
+            self.rect.center = (random.randint(40, SCREEN_WIDTH - 40), 0)
 
 
-class Coin(pygame.sprite.Sprite):
-    """Coin with a random weight; weight decides look and value."""
+class Player(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
-        # random.choices picks a type using the 'chance' values as probabilities
+        self.image = load_image("Player.png", (45, 80), (30, 80, 200))
+        self.rect = self.image.get_rect()
+        self.rect.center = (160, 520)
+
+    def move(self):
+        pressed_keys = pygame.key.get_pressed()
+
+        if self.rect.left > 0:
+              if pressed_keys[K_LEFT]:
+                  self.rect.move_ip(-5, 0)
+        if self.rect.right < SCREEN_WIDTH:
+              if pressed_keys[K_RIGHT]:
+                  self.rect.move_ip(5, 0)
+
+
+# Coin with a random weight: bigger and differently coloured coins are worth more
+class Coin(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+        # random.choices picks one coin type using the "chance" values as probabilities
         kind = random.choices(COIN_TYPES, weights=[t["chance"] for t in COIN_TYPES])[0]
         self.weight = kind["weight"]
         r = kind["radius"]
         self.image = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
         pygame.draw.circle(self.image, kind["color"], (r, r), r)
         pygame.draw.circle(self.image, BLACK, (r, r), r, 2)
-        label = font_coin.render(str(self.weight), True, BLACK)   # show weight on coin
+        label = font_tiny.render(str(self.weight), True, BLACK)    # weight written on the coin
         self.image.blit(label, label.get_rect(center=(r, r)))
-        self.rect = self.image.get_rect(
-            center=(random.randint(ROAD_LEFT + 25, ROAD_RIGHT - 25), -20))
+        self.rect = self.image.get_rect()
+        self.rect.center = (random.randint(40, SCREEN_WIDTH-40), 0)
 
-    def update(self):
-        self.rect.y += road_speed
-        if self.rect.top > HEIGHT:
+    def move(self):
+        self.rect.move_ip(0, COIN_SPEED)
+        if (self.rect.top > SCREEN_HEIGHT):
             self.kill()
 
 
-def draw_road(offset):
-    """Draw grass, road and scrolling dashed centre line."""
-    screen.fill(GREEN)
-    pygame.draw.rect(screen, GRAY, (ROAD_LEFT, 0, ROAD_RIGHT - ROAD_LEFT, HEIGHT))
-    pygame.draw.rect(screen, WHITE, (ROAD_LEFT, 0, 4, HEIGHT))
-    pygame.draw.rect(screen, WHITE, (ROAD_RIGHT - 4, 0, 4, HEIGHT))
-    for y in range(-80, HEIGHT, 80):
-        pygame.draw.rect(screen, WHITE, (WIDTH // 2 - 3, y + offset, 6, 40))
+#Setting up Sprites
+P1 = Player()
+E1 = Enemy()
 
+#Creating Sprites Groups
+enemies = pygame.sprite.Group()
+enemies.add(E1)
+coins = pygame.sprite.Group()
+all_sprites = pygame.sprite.Group()
+all_sprites.add(P1)
+all_sprites.add(E1)
 
-def game_over():
-    screen.fill(RED)
-    screen.blit(font_big.render("Game Over", True, BLACK), (60, 220))
-    screen.blit(font_small.render(f"Score: {score}   Coins: {coins}", True, BLACK), (100, 300))
-    pygame.display.update()
-    pygame.time.wait(2500)
-    pygame.quit()
-    sys.exit()
+#Adding a new User event for creating coins
+SPAWN_COIN = pygame.USEREVENT + 2
+pygame.time.set_timer(SPAWN_COIN, 1200)
 
-
-player = Player()
-enemy = Enemy()
-all_sprites = pygame.sprite.Group(player, enemy)
-enemies = pygame.sprite.Group(enemy)
-coin_group = pygame.sprite.Group()
-
-SPAWN_COIN = pygame.USEREVENT + 1
-pygame.time.set_timer(SPAWN_COIN, 1200)       # chance to spawn a coin every 1.2 s
-
-road_offset = 0
-
+#Game Loop
 while True:
+
+    #Cycles through all events occurring
     for event in pygame.event.get():
-        if event.type == pygame.QUIT:
+        if event.type == SPAWN_COIN and random.randint(1, 100) <= 75:
+              C1 = Coin()
+              coins.add(C1)
+              all_sprites.add(C1)
+        if event.type == QUIT:
             pygame.quit()
             sys.exit()
-        if event.type == SPAWN_COIN and random.random() < 0.75:
-            c = Coin()
-            coin_group.add(c)
-            all_sprites.add(c)
 
-    road_offset = (road_offset + road_speed) % 80
-    draw_road(road_offset)
+    DISPLAYSURF.blit(background, (0,0))
+    scores = font_small.render(str(SCORE), True, BLACK)
+    DISPLAYSURF.blit(scores, (10,10))
 
-    all_sprites.update()
-    for s in all_sprites:
-        screen.blit(s.image, s.rect)
+    # Coins in the top right corner
+    coin_text = font_small.render("Coins: " + str(COINS), True, BLACK)
+    DISPLAYSURF.blit(coin_text, (SCREEN_WIDTH - coin_text.get_width() - 10, 10))
+    # Current enemy speed (helps to see the speed-up working)
+    speed_text = font_tiny.render("Enemy speed: " + str(ENEMY_SPEED), True, BLACK)
+    DISPLAYSURF.blit(speed_text, (10, 35))
 
-    # Collect coins: add each coin's weight, then check for enemy speed-up
-    for c in pygame.sprite.spritecollide(player, coin_group, True):
-        coins += c.weight
-    while coins >= next_speedup:                 # 'while' in case a heavy coin skips a threshold
-        enemy_speed += ENEMY_SPEED_STEP
-        next_speedup += N_COINS_FOR_SPEEDUP
+    #Moves and Re-draws all Sprites
+    for entity in all_sprites:
+        DISPLAYSURF.blit(entity.image, entity.rect)
+        entity.move()
 
-    # HUD
-    screen.blit(font_small.render(f"Score: {score}", True, WHITE), (10, 10))
-    coin_text = font_small.render(f"Coins: {coins}", True, YELLOW)
-    screen.blit(coin_text, (WIDTH - coin_text.get_width() - 10, 10))
-    screen.blit(font_coin.render(f"Enemy speed: {enemy_speed}", True, WHITE), (10, 36))
+    # Collect coins: add the weight of each collected coin
+    for coin in pygame.sprite.spritecollide(P1, coins, True):
+        COINS += coin.weight
 
-    if pygame.sprite.spritecollideany(player, enemies):
-        game_over()
+    # NEW: every time the player earns N more coins, the enemy gets faster.
+    # "while" is used because a heavy coin can jump over a threshold.
+    while COINS >= next_speedup:
+        ENEMY_SPEED += SPEED_STEP
+        next_speedup += N
+
+    #To be run if collision occurs between Player and Enemy
+    if pygame.sprite.spritecollideany(P1, enemies):
+          play_crash()
+          time.sleep(0.5)
+
+          DISPLAYSURF.fill(RED)
+          DISPLAYSURF.blit(game_over, (30,250))
+
+          pygame.display.update()
+          for entity in all_sprites:
+                entity.kill()
+          time.sleep(2)
+          pygame.quit()
+          sys.exit()
 
     pygame.display.update()
-    clock.tick(FPS)
+    FramePerSec.tick(FPS)

@@ -1,157 +1,192 @@
-import pygame
-import random
-import sys
+#Imports
+import pygame, sys
+from pygame.locals import *
+import random, time
 
+#Initializing
 pygame.init()
 
-# ---------- Constants ----------
-WIDTH, HEIGHT = 400, 600
+#Setting up FPS
 FPS = 60
-ROAD_LEFT, ROAD_RIGHT = 40, 360          # road borders (grass outside)
-GRAY, WHITE, YELLOW = (60, 60, 60), (255, 255, 255), (255, 215, 0)
-GREEN, RED, BLUE, BLACK = (34, 139, 34), (200, 30, 30), (30, 80, 200), (0, 0, 0)
+FramePerSec = pygame.time.Clock()
 
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Racer")
-clock = pygame.time.Clock()
+#Creating colors
+BLUE  = (0, 0, 255)
+RED   = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLACK = (0, 0, 0)
+WHITE = (255, 255, 255)
+YELLOW = (255, 215, 0)
+
+#Other Variables for use in the program
+SCREEN_WIDTH = 400
+SCREEN_HEIGHT = 600
+SPEED = 5       # speed of enemy and coins (grows with time)
+SCORE = 0       # number of enemies passed
+COINS = 0       # number of collected coins
+
+#Setting up Fonts
+font = pygame.font.SysFont("Verdana", 60)
 font_small = pygame.font.SysFont("Verdana", 20)
-font_big = pygame.font.SysFont("Verdana", 50)
+game_over = font.render("Game Over", True, BLACK)
 
-speed = 5          # how fast enemies, coins and road move (grows over time)
-score = 0          # number of enemies dodged
-coins = 0          # number of coins collected
-
-
-def make_car(color):
-    """Draw a simple top-down car on a transparent surface and return it."""
-    surf = pygame.Surface((40, 70), pygame.SRCALPHA)
-    pygame.draw.rect(surf, color, (0, 0, 40, 70), border_radius=8)       # body
-    pygame.draw.rect(surf, (150, 200, 255), (6, 14, 28, 16))             # windshield
-    pygame.draw.rect(surf, (150, 200, 255), (6, 44, 28, 12))             # rear window
-    for y in (6, 50):                                                    # wheels
-        pygame.draw.rect(surf, BLACK, (-2, y, 5, 14))
-        pygame.draw.rect(surf, BLACK, (37, y, 5, 14))
-    return surf
+# If files from the tutorial archive are missing, simple drawn pictures are used instead
+def load_image(name, size, color):
+    try:
+        return pygame.image.load(name)
+    except (FileNotFoundError, pygame.error):
+        surf = pygame.Surface(size, pygame.SRCALPHA)
+        pygame.draw.rect(surf, color, (0, 0, size[0], size[1]), border_radius=8)
+        pygame.draw.rect(surf, (150, 200, 255), (6, 12, size[0] - 12, 16))   # windshield
+        return surf
 
 
-class Player(pygame.sprite.Sprite):
-    """The car controlled by the user."""
-    def __init__(self):
-        super().__init__()
-        self.image = make_car(BLUE)
-        self.rect = self.image.get_rect(center=(WIDTH // 2, HEIGHT - 60))
+def load_background():
+    try:
+        return pygame.image.load("AnimatedStreet.png")
+    except (FileNotFoundError, pygame.error):
+        surf = pygame.Surface((400, 600))
+        surf.fill((34, 139, 34))
+        pygame.draw.rect(surf, (60, 60, 60), (40, 0, 320, 600))
+        for y in range(0, 600, 80):
+            pygame.draw.rect(surf, (255, 255, 255), (197, y, 6, 40))
+        return surf
 
-    def update(self):
-        keys = pygame.key.get_pressed()
-        if (keys[pygame.K_LEFT] or keys[pygame.K_a]) and self.rect.left > ROAD_LEFT:
-            self.rect.x -= 6
-        if (keys[pygame.K_RIGHT] or keys[pygame.K_d]) and self.rect.right < ROAD_RIGHT:
-            self.rect.x += 6
+
+def play_crash():
+    try:
+        pygame.mixer.Sound('crash.wav').play()
+    except (FileNotFoundError, pygame.error):
+        pass
+
+
+#Images and sound (files from the tutorial archive must be in the same folder)
+background = load_background()
+
+#Create a white screen
+DISPLAYSURF = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+DISPLAYSURF.fill(WHITE)
+pygame.display.set_caption("Game")
 
 
 class Enemy(pygame.sprite.Sprite):
-    """Enemy car that drives down the screen; respawns at the top."""
-    def __init__(self):
+      def __init__(self):
         super().__init__()
-        self.image = make_car(RED)
+        self.image = load_image("Enemy.png", (45, 80), (200, 30, 30))
         self.rect = self.image.get_rect()
-        self.respawn()
+        self.rect.center = (random.randint(40, SCREEN_WIDTH-40), 0)
 
-    def respawn(self):
-        self.rect.center = (random.randint(ROAD_LEFT + 25, ROAD_RIGHT - 25), -40)
-
-    def update(self):
-        global score
-        self.rect.y += speed
-        if self.rect.top > HEIGHT:        # passed the bottom -> player scores
-            score += 1
-            self.respawn()
+      def move(self):
+        global SCORE
+        self.rect.move_ip(0, SPEED)
+        if (self.rect.top > 600):
+            SCORE += 1
+            self.rect.top = 0
+            self.rect.center = (random.randint(40, SCREEN_WIDTH - 40), 0)
 
 
-class Coin(pygame.sprite.Sprite):
-    """Coin that appears at a random x position and falls with the road."""
+class Player(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
+        self.image = load_image("Player.png", (45, 80), (30, 80, 200))
+        self.rect = self.image.get_rect()
+        self.rect.center = (160, 520)
+
+    def move(self):
+        pressed_keys = pygame.key.get_pressed()
+
+        if self.rect.left > 0:
+              if pressed_keys[K_LEFT]:
+                  self.rect.move_ip(-5, 0)
+        if self.rect.right < SCREEN_WIDTH:
+              if pressed_keys[K_RIGHT]:
+                  self.rect.move_ip(5, 0)
+
+
+# NEW: Coin class - a coin that appears at a random place at the top
+# and falls down the road like the enemy does
+class Coin(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+        # No coin image in the archive, so we draw the coin on a surface
         self.image = pygame.Surface((24, 24), pygame.SRCALPHA)
         pygame.draw.circle(self.image, YELLOW, (12, 12), 12)
-        pygame.draw.circle(self.image, (200, 150, 0), (12, 12), 12, 2)
-        pygame.draw.circle(self.image, (200, 150, 0), (12, 12), 6, 2)
-        self.rect = self.image.get_rect(
-            center=(random.randint(ROAD_LEFT + 20, ROAD_RIGHT - 20), -20))
+        pygame.draw.circle(self.image, BLACK, (12, 12), 12, 2)
+        pygame.draw.circle(self.image, BLACK, (12, 12), 6, 2)
+        self.rect = self.image.get_rect()
+        self.rect.center = (random.randint(40, SCREEN_WIDTH-40), 0)   # random x position
 
-    def update(self):
-        self.rect.y += speed
-        if self.rect.top > HEIGHT:        # missed coin disappears
+    def move(self):
+        self.rect.move_ip(0, SPEED)
+        if (self.rect.top > SCREEN_HEIGHT):      # missed coin disappears
             self.kill()
 
 
-def draw_road(offset):
-    """Draw grass, road and scrolling dashed lane markings."""
-    screen.fill(GREEN)
-    pygame.draw.rect(screen, GRAY, (ROAD_LEFT, 0, ROAD_RIGHT - ROAD_LEFT, HEIGHT))
-    pygame.draw.rect(screen, WHITE, (ROAD_LEFT, 0, 4, HEIGHT))
-    pygame.draw.rect(screen, WHITE, (ROAD_RIGHT - 4, 0, 4, HEIGHT))
-    for y in range(-80, HEIGHT, 80):
-        pygame.draw.rect(screen, WHITE, (WIDTH // 2 - 3, y + offset, 6, 40))
+#Setting up Sprites
+P1 = Player()
+E1 = Enemy()
 
+#Creating Sprites Groups
+enemies = pygame.sprite.Group()
+enemies.add(E1)
+coins = pygame.sprite.Group()          # NEW: group of coins
+all_sprites = pygame.sprite.Group()
+all_sprites.add(P1)
+all_sprites.add(E1)
 
-def game_over():
-    """Show the game over screen, then quit."""
-    screen.fill(RED)
-    screen.blit(font_big.render("Game Over", True, BLACK), (60, 220))
-    screen.blit(font_small.render(f"Score: {score}   Coins: {coins}", True, BLACK), (100, 300))
-    pygame.display.update()
-    pygame.time.wait(2500)
-    pygame.quit()
-    sys.exit()
+#Adding new User events
+INC_SPEED = pygame.USEREVENT + 1
+pygame.time.set_timer(INC_SPEED, 1000)
+SPAWN_COIN = pygame.USEREVENT + 2      # NEW: event for creating coins
+pygame.time.set_timer(SPAWN_COIN, 1500)
 
-
-# ---------- Sprites ----------
-player = Player()
-enemy = Enemy()
-all_sprites = pygame.sprite.Group(player, enemy)
-enemies = pygame.sprite.Group(enemy)
-coin_group = pygame.sprite.Group()
-
-SPAWN_COIN = pygame.USEREVENT + 1
-pygame.time.set_timer(SPAWN_COIN, 1500)       # try to spawn a coin every 1.5 s
-INC_SPEED = pygame.USEREVENT + 2
-pygame.time.set_timer(INC_SPEED, 3000)        # road gets faster every 3 s
-
-road_offset = 0
-
-# ---------- Main loop ----------
+#Game Loop
 while True:
+
+    #Cycles through all events occurring
     for event in pygame.event.get():
-        if event.type == pygame.QUIT:
+        if event.type == INC_SPEED:
+              SPEED += 0.5
+        # NEW: with 70% chance a coin appears each time the event fires
+        if event.type == SPAWN_COIN and random.randint(1, 100) <= 70:
+              C1 = Coin()
+              coins.add(C1)
+              all_sprites.add(C1)
+        if event.type == QUIT:
             pygame.quit()
             sys.exit()
-        if event.type == INC_SPEED:
-            speed += 0.5
-        if event.type == SPAWN_COIN and random.random() < 0.7:   # random appearance
-            c = Coin()
-            coin_group.add(c)
-            all_sprites.add(c)
 
-    road_offset = (road_offset + speed) % 80
-    draw_road(road_offset)
+    DISPLAYSURF.blit(background, (0,0))
+    scores = font_small.render(str(SCORE), True, BLACK)
+    DISPLAYSURF.blit(scores, (10,10))
 
-    all_sprites.update()
-    for s in all_sprites:
-        screen.blit(s.image, s.rect)
+    # NEW: number of collected coins in the top right corner
+    coin_text = font_small.render("Coins: " + str(COINS), True, BLACK)
+    DISPLAYSURF.blit(coin_text, (SCREEN_WIDTH - coin_text.get_width() - 10, 10))
 
-    # Collect coins
-    for _ in pygame.sprite.spritecollide(player, coin_group, True):
-        coins += 1
+    #Moves and Re-draws all Sprites
+    for entity in all_sprites:
+        DISPLAYSURF.blit(entity.image, entity.rect)
+        entity.move()
 
-    # HUD: score top-left, coins top-right
-    screen.blit(font_small.render(f"Score: {score}", True, WHITE), (10, 10))
-    coin_text = font_small.render(f"Coins: {coins}", True, YELLOW)
-    screen.blit(coin_text, (WIDTH - coin_text.get_width() - 10, 10))
+    # NEW: player touches a coin -> coin is removed (True) and counter grows
+    for coin in pygame.sprite.spritecollide(P1, coins, True):
+        COINS += 1
 
-    # Crash with enemy
-    if pygame.sprite.spritecollideany(player, enemies):
-        game_over()
+    #To be run if collision occurs between Player and Enemy
+    if pygame.sprite.spritecollideany(P1, enemies):
+          play_crash()
+          time.sleep(0.5)
+
+          DISPLAYSURF.fill(RED)
+          DISPLAYSURF.blit(game_over, (30,250))
+
+          pygame.display.update()
+          for entity in all_sprites:
+                entity.kill()
+          time.sleep(2)
+          pygame.quit()
+          sys.exit()
 
     pygame.display.update()
-    clock.tick(FPS)
+    FramePerSec.tick(FPS)
